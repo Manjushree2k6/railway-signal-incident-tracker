@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Railway Signal Incident Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f4f6f8;color:#1b2430}
+header{background:#12355b;color:#fff;padding:12px 16px}header h1{margin:0;font-size:18px}
+nav{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;background:#fff;border-bottom:1px solid #dde}
+nav button{border:0;padding:8px 12px;border-radius:6px;background:#e8edf3;cursor:pointer}nav .on{background:#12355b;color:#fff}
+main{max-width:1000px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:10px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px #0001}
+label{display:block;margin:8px 0 2px;font-size:13px;font-weight:600}input,select,textarea{width:100%;padding:8px;border:1px solid #bcc;border-radius:6px;font:inherit}
+button.p{margin-top:10px;padding:9px 14px;border:0;border-radius:6px;background:#12355b;color:#fff;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}.stat{text-align:center}.stat b{display:block;font-size:26px}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid #e3e7ec;text-align:left;white-space:nowrap}
+.ok{color:#0a7a3d}.bad{color:#b3261e}.tag{padding:2px 7px;border-radius:10px;background:#e8edf3;font-size:12px}.Critical{background:#fbd5d2}
+.bar{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px}.bar i{display:block;height:16px;background:#2f6fb3;border-radius:3px}.bar span:first-child{width:130px}
+</style></head><body><div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect}=React;
+const api=async(u,o={})=>{const r=await fetch(u,{headers:{"Content-Type":"application/json"},...o,body:o.body&&JSON.stringify(o.body)});return {ok:r.ok,d:await r.json()}};
+const Table=({cols,rows})=><div className="tw"><table><thead><tr>{cols.map(c=><th key={c[0]}>{c[0]}</th>)}</tr></thead>
+<tbody>{rows.map((r,i)=><tr key={i}>{cols.map(c=><td key={c[0]}>{c[1](r)}</td>)}</tr>)}</tbody></table></div>;
+const Tag=({v})=><span className={"tag "+v}>{v||"-"}</span>;
+const RCOLS=[["ID",r=>r.report_id],["Code",r=>r.code],["Category",r=>r.category],["Priority",r=>r.priority&&<Tag v={r.priority}/>],
+ ["Zone",r=>r.division||"-"],["Route",r=>r.route],["Handler",r=>r.handler||"-"],["Status",r=>r.status],["Submitted",r=>r.created_at]];
+
+function Submit(){
+ const [f,setF]=useState({reporter:"",code:"",description:"",urgency:"Normal"});
+ const [v,setV]=useState(null),[res,setRes]=useState(null);
+ const set=k=>e=>setF({...f,[k]:e.target.value});
+ useEffect(()=>{if(!f.code){setV(null);return}
+  const t=setTimeout(async()=>setV((await api("/api/validate",{method:"POST",body:f})).d),250);return()=>clearTimeout(t)},[f.code,f.description,f.urgency]);
+ const send=async e=>{e.preventDefault();setRes((await api("/api/reports",{method:"POST",body:f})).d)};
+ return <div className="card"><h3>Report Submission</h3><form onSubmit={send}>
+  <label>Reporter (station master)</label><input value={f.reporter} onChange={set("reporter")} required/>
+  <label>Report code (station + incident, e.g. AAA12-SIG01)</label><input value={f.code} onChange={set("code")} required/>
+  {v&&<div className={v.dfa?"ok":"bad"}>{v.dfa?`✔ Valid (DFA ${v.dfa?"accepts":"rejects"} / regex ${v.regex?"accepts":"rejects"}) · ${v.category} · ${v.priority} · ${v.division}`:`✘ ${v.reason}`}</div>}
+  <label>Description</label><textarea rows="3" value={f.description} onChange={set("description")}/>
+  <label>Urgency</label><select value={f.urgency} onChange={set("urgency")}><option>Normal</option><option>Emergency</option></select>
+  <button className="p">Submit report</button></form>
+  {res&&<p className={res.error?"bad":"ok"}>{res.error||`Report ${res.report_id}: ${res.status} · ${res.route}${res.handler?" · "+res.handler:""}${res.reason?" · "+res.reason:""}`}</p>}</div>}
+
+function UserDash(){
+ const [s,setS]=useState({}),[q,setQ]=useState(""),[r,setR]=useState(null);
+ useEffect(()=>{api("/api/stats").then(x=>setS(x.d))},[]);
+ const find=async()=>setR((await api("/api/reports?report_id="+encodeURIComponent(q.trim()))).d);
+ return <div><div className="card grid">{[["Total","total"],["Pending","pending"],["Assigned","assigned"],["Resolved","resolved"]].map(([l,k])=>
+  <div className="stat" key={k}><b>{s[k]??0}</b>{l}</div>)}</div>
+  <div className="card"><h3>Track a report</h3><input placeholder="RPT-XXXXXXXX" value={q} onChange={e=>setQ(e.target.value)}/>
+  <button className="p" onClick={find}>Search</button>
+  {r&&(r.length?<Table cols={RCOLS} rows={r}/>:<p className="bad">No report found.</p>)}</div></div>}
+
+function HandlerDash(){
+ const [hs,setHs]=useState([]),[sel,setSel]=useState(""),[rs,setRs]=useState([]);
+ const load=async()=>{const h=(await api("/api/handlers")).d;setHs(h);const id=sel||h[0].id;setSel(id);setRs((await api("/api/reports?handler_id="+id)).d)};
+ useEffect(()=>{load()},[sel]);
+ const cur=hs.find(h=>h.id==sel);
+ const patch=async b=>{await api("/api/handlers/"+sel,{method:"PATCH",body:b});load()};
+ const adv=async(r,s)=>{await api(`/api/reports/${r.report_id}/status`,{method:"PATCH",body:{status:s}});load()};
+ const NX={Assigned:"In Progress","In Progress":"Resolved"};
+ return <div className="card"><h3>Handler Dashboard</h3>
+  <select value={sel} onChange={e=>setSel(e.target.value)}>{hs.map(h=><option key={h.id} value={h.id}>{h.division} – {h.team}</option>)}</select>
+  {cur&&<p>Load {cur.load}/{cur.capacity} · <label style={{display:"inline"}}><input type="checkbox" style={{width:"auto"}} checked={!!cur.available} onChange={e=>patch({available:e.target.checked})}/> available</label>
+  {" "}Capacity <input type="number" min="0" style={{width:70}} defaultValue={cur.capacity} key={cur.id+"c"+cur.capacity} onBlur={e=>patch({capacity:e.target.value})}/></p>}
+  <Table cols={[...RCOLS,["Action",r=>NX[r.status]?<button onClick={()=>adv(r,NX[r.status])}>→ {NX[r.status]}</button>:""]]} rows={rs}/></div>}
+
+function Routing(){
+ const [d,setD]=useState(null);useEffect(()=>{api("/api/routing").then(x=>setD(x.d))},[]);
+ if(!d)return null;
+ return <div><div className="card"><h3>Routing table (30 stations)</h3><div className="tw"><table><tbody>
+  {["South Division","Central Division","North Division"].map(z=><tr key={z}><th>{z}</th><td style={{whiteSpace:"normal"}}>{d.routing.filter(r=>r.division==z).map(r=>r.station).join(", ")}</td></tr>)}</tbody></table></div>
+  <p>Critical → <b>Division → Zonal HQ</b> (mandatory second tier). Unknown station → Central Correction Queue.</p>
+  <Table cols={[["Category",c=>c],["Handler",c=>d.handler_table[c]],["Priority",c=><Tag v={d.priority_table[c]}/>]]} rows={Object.keys(d.handler_table)}/></div>
+  <div className="card"><h3>Handler loads</h3><Table cols={[["Division",h=>h.division],["Team",h=>h.team],["Load",h=>`${h.load}/${h.capacity}`],["Available",h=>h.available?"Yes":"No"]]} rows={d.handlers}/></div>
+  <div className="card"><h3>Queued reports</h3><Table cols={RCOLS} rows={d.queue}/></div>
+  <div className="card"><h3>Escalation / override / backup decisions</h3><Table cols={[...RCOLS.slice(0,3),["Route",r=>r.route],["Handler",r=>r.handler||"-"],["Note",r=>r.note]]} rows={d.decisions}/></div></div>}
+
+function Bars({data}){const m=Math.max(1,...Object.values(data));
+ return Object.entries(data).map(([k,v])=><div className="bar" key={k}><span>{k}</span><i style={{width:(v/m*60)+"%"}}/><span>{v}</span></div>)}
+function Analytics(){
+ const [s,setS]=useState(null);useEffect(()=>{api("/api/stats").then(x=>setS(x.d))},[]);
+ if(!s)return null;
+ return <div><div className="card"><h3>By zone</h3><Bars data={s.by_zone}/></div><div className="card"><h3>By category</h3><Bars data={s.by_category}/></div>
+  <div className="card"><h3>Resolved vs unresolved</h3><Bars data={{Resolved:s.resolved,Unresolved:s.unresolved,Rejected:s.rejected}}/></div></div>}
+
+function App(){
+ const T=[["Submit",Submit],["My Reports",UserDash],["Handler",HandlerDash],["Routing",Routing],["Analytics",Analytics]];
+ const [t,setT]=useState(0);const C=T[t][1];
+ return <><header><h1>🚆 Railway Signal Incident Tracker</h1></header>
+ <nav>{T.map((x,i)=><button key={x[0]} className={i==t?"on":""} onClick={()=>setT(i)}>{x[0]}</button>)}</nav><main><C key={t}/></main></>}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script></body></html>
